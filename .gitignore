@@ -1,0 +1,5 @@
+pytorch_model.bin
+*.bin
+*.pt
+*.ckpt
+*.safetensors
