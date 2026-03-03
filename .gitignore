@@ -1,0 +1,15 @@
+pytorch_model.bin
+*.bin
+*.pt
+*.ckpt
+*.safetensors
+
+.venv/
+__pycache__/
+*.pyc
+
+ct2_model*/
+onnx_model*/
+
+benchmark_results*.json
+bench_clips/
