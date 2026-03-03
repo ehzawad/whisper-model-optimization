@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Bengali ASR inference using fine-tuned Whisper Medium (float16 + SDPA)."""
+"""Bengali ASR inference using fine-tuned Whisper Medium (float16 + SDPA).
+
+Handles both short clips and long-form audio (via 30s chunked pipeline).
+"""
 
 import os
 import sys
 
-import librosa
 import torch
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from transformers import WhisperForConditionalGeneration, WhisperProcessor, pipeline
 
 MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -33,22 +35,27 @@ def main():
         attn_implementation="sdpa",
     ).to(DEVICE)
 
-    # Load and resample audio to 16 kHz
-    audio, _ = librosa.load(audio_path, sr=16000)
-    input_features = processor(
-        audio, sampling_rate=16000, return_tensors="pt"
-    ).input_features.to(DEVICE, dtype=torch.float16)
-
-    # Force Bengali transcription (set on generation_config for older checkpoints)
-    model.generation_config.forced_decoder_ids = processor.get_decoder_prompt_ids(
+    forced_decoder_ids = processor.get_decoder_prompt_ids(
         language="bn", task="transcribe"
     )
+    model.generation_config.forced_decoder_ids = forced_decoder_ids
 
-    with torch.no_grad():
-        predicted_ids = model.generate(input_features)
+    # Use chunked pipeline for robust long-form transcription
+    pipe = pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        chunk_length_s=30,
+        device=DEVICE,
+        torch_dtype=torch.float16,
+    )
 
-    transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-    print(transcription)
+    result = pipe(
+        audio_path,
+        generate_kwargs={"forced_decoder_ids": forced_decoder_ids},
+    )
+    print(result["text"])
 
 
 if __name__ == "__main__":
