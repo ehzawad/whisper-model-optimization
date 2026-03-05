@@ -1,0 +1,19 @@
+# Core inference (HuggingFace Whisper)
+transformers>=4.45.0,<5.0
+
+# VAD
+silero-vad>=5.1
+
+# Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+websockets>=12.0
+
+# Audio processing
+numpy>=1.26.0
+soundfile>=0.12.0
+librosa>=0.10.0
+
+# PyTorch (Whisper model + Silero VAD)
+torch>=2.5.0
+torchaudio>=2.5.0

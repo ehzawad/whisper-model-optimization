@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bengali Streaming ASR</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: #38bdf8;
+        }
+        #controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        button {
+            padding: 0.75rem 2rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        #startBtn {
+            background: #22c55e;
+            color: white;
+        }
+        #startBtn:hover { background: #16a34a; }
+        #startBtn:disabled { background: #4b5563; cursor: not-allowed; }
+        #stopBtn {
+            background: #ef4444;
+            color: white;
+        }
+        #stopBtn:hover { background: #dc2626; }
+        #stopBtn:disabled { background: #4b5563; cursor: not-allowed; }
+        #status {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-bottom: 1rem;
+        }
+        #status.connected { color: #22c55e; }
+        #status.error { color: #ef4444; }
+        #transcript {
+            width: 100%;
+            max-width: 800px;
+            min-height: 400px;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            font-size: 1.25rem;
+            line-height: 1.8;
+            overflow-y: auto;
+            direction: ltr;
+        }
+        .final-text {
+            color: #f1f5f9;
+            font-weight: 500;
+        }
+        .partial-text {
+            color: #64748b;
+            font-style: italic;
+        }
+        .timestamp {
+            font-size: 0.7rem;
+            color: #475569;
+            vertical-align: super;
+        }
+    </style>
+</head>
+<body>
+    <h1>Bengali Streaming ASR</h1>
+
+    <div id="controls">
+        <button id="startBtn" onclick="startRecording()">Start Recording</button>
+        <button id="stopBtn" onclick="stopRecording()" disabled>Stop</button>
+    </div>
+
+    <div id="status">Click Start to begin</div>
+    <div id="transcript"></div>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let workletNode = null;
+
+        const TARGET_SR = 16000;
+        const BUFFER_SIZE = 4096;
+
+        function setStatus(msg, cls) {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = cls || '';
+        }
+
+        async function startRecording() {
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('transcript').innerHTML = '';
+
+            try {
+                // Connect WebSocket
+                const wsUrl = `ws://${location.host}/ws/transcribe`;
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => setStatus('Connected — listening...', 'connected');
+                ws.onclose = () => setStatus('Disconnected');
+                ws.onerror = () => setStatus('Connection error', 'error');
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                };
+
+                // Get mic access
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: TARGET_SR,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                    }
+                });
+
+                audioContext = new AudioContext({ sampleRate: TARGET_SR });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                // Use ScriptProcessorNode (widely supported)
+                const processor = audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+                processor.onaudioprocess = (e) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const float32 = e.inputBuffer.getChannelData(0);
+                        // Convert float32 to PCM16 LE
+                        const pcm16 = new Int16Array(float32.length);
+                        for (let i = 0; i < float32.length; i++) {
+                            pcm16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32768)));
+                        }
+                        ws.send(pcm16.buffer);
+                    }
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                setStatus('Recording...', 'connected');
+
+            } catch (err) {
+                setStatus('Error: ' + err.message, 'error');
+                stopRecording();
+            }
+        }
+
+        function stopRecording() {
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(t => t.stop());
+                mediaStream = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (ws) {
+                try { ws.send('END'); } catch(e) {}
+                setTimeout(() => {
+                    if (ws) { ws.close(); ws = null; }
+                }, 2000);
+            }
+            setStatus('Stopped');
+        }
+
+        function handleMessage(data) {
+            const transcript = document.getElementById('transcript');
+
+            if (data.type === 'final') {
+                // Remove any existing partial
+                const partial = transcript.querySelector('.partial-text');
+                if (partial) partial.remove();
+
+                const span = document.createElement('span');
+                span.className = 'final-text';
+                span.textContent = data.text + ' ';
+                transcript.appendChild(span);
+
+            } else if (data.type === 'partial') {
+                let partial = transcript.querySelector('.partial-text');
+                if (!partial) {
+                    partial = document.createElement('span');
+                    partial.className = 'partial-text';
+                    transcript.appendChild(partial);
+                }
+                partial.textContent = data.text;
+
+            } else if (data.type === 'info') {
+                console.log('[info]', data.message);
+
+            } else if (data.type === 'error') {
+                setStatus('Error: ' + data.message, 'error');
+            }
+
+            // Auto-scroll
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+    </script>
+</body>
+</html>

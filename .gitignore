@@ -3,3 +3,11 @@ pytorch_model.bin
 *.pt
 *.ckpt
 *.safetensors
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# CTranslate2 converted model
+ct2_model/
