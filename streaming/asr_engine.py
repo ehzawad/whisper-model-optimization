@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+from scipy.signal import butter, sosfilt
 
 # Suppress noisy HF deprecation warnings
 warnings.filterwarnings("ignore", message=".*forced_decoder_ids.*")
@@ -66,6 +67,14 @@ class ASRConfig:
     # Hallucination filter
     no_speech_prob_threshold: float = 0.6
     avg_logprob_threshold: float = -1.0
+
+    # Audio preprocessing (3-stage: HPF → noise reduction → AGC)
+    preprocessing_enabled: bool = True
+    highpass_cutoff_hz: float = 80.0          # HPF cutoff (removes DC + room rumble)
+    noise_reduction_stationary: bool = False   # Non-stationary adapts to changing noise
+    noise_reduction_prop_decrease: float = 0.6 # Reduction strength (0.0–1.0)
+    agc_target_rms: float = 0.05              # Target RMS level for AGC
+    agc_max_gain: float = 10.0                # Max amplification factor
 
 
 class StreamingASREngine:
@@ -243,11 +252,59 @@ class StreamingASREngine:
 
         result = self.model.generate(feats, **gen_kwargs)
         text = self.processor.batch_decode(result, skip_special_tokens=True)
-        return text[0].strip() if text else ""
+        text = text[0].strip() if text else ""
+
+        # CRITICAL: When prompt_ids is used, Whisper includes the prompt in the
+        # output. Strip it to avoid re-committing already committed text.
+        if prompt and text.startswith(prompt.strip()):
+            text = text[len(prompt.strip()):].strip()
+
+        return text
+
+    def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
+        """3-stage audio preprocessing: HPF → noise reduction → AGC."""
+        if not self.config.preprocessing_enabled:
+            return audio
+
+        t0 = time.perf_counter()
+
+        # Stage 1: High-pass filter — removes DC offset + low-freq room resonance
+        sos = butter(5, self.config.highpass_cutoff_hz, btype='high',
+                     fs=SAMPLE_RATE, output='sos')
+        audio = sosfilt(sos, audio).astype(np.float32)
+
+        # Stage 2: Noise reduction (spectral gating) — removes noise + reverb tail
+        from noisereduce import reduce_noise
+        audio = reduce_noise(
+            y=audio,
+            sr=SAMPLE_RATE,
+            stationary=self.config.noise_reduction_stationary,
+            prop_decrease=self.config.noise_reduction_prop_decrease,
+            use_torch=False,
+            n_jobs=1,
+        )
+
+        # Stage 3: Adaptive AGC — normalize RMS to target level
+        rms = np.sqrt(np.mean(audio ** 2))
+        if rms > 1e-8:  # Don't amplify near-silence
+            gain = min(self.config.agc_max_gain,
+                       self.config.agc_target_rms / rms)
+            audio = np.clip(audio * gain, -1.0, 1.0).astype(np.float32)
+
+        elapsed = time.perf_counter() - t0
+        logger.info("Preprocessing: %.3fs (HPF+NR+AGC) for %.1fs audio",
+                     elapsed, len(audio) / SAMPLE_RATE)
+        return audio
 
     def _run_inference_on(self, audio: np.ndarray) -> list[dict]:
         """Run Whisper + LocalAgreement-2 on an audio buffer snapshot."""
         results = []
+
+        # Preprocess: HPF → noise reduction → AGC
+        try:
+            audio = self._preprocess_audio(audio)
+        except Exception as e:
+            logger.warning("Preprocessing failed, using raw audio: %s", e)
 
         prompt = self._build_prompt()
         t0 = time.perf_counter()
@@ -287,6 +344,16 @@ class StreamingASREngine:
                 "start": seg.start,
                 "end": seg.end,
             })
+
+            # Trim buffer after committing — remove the committed portion
+            # to prevent Whisper from re-transcribing already committed audio
+            committed_frac = len(committed) / max(1, len(current_words))
+            trim_samples = int(committed_frac * len(audio))
+            if trim_samples > 0 and len(self.audio_buffer) > trim_samples:
+                self.audio_buffer = self.audio_buffer[trim_samples:]
+                self.buffer_offset_samples += trim_samples
+                self._last_inference_samples = max(
+                    0, self._last_inference_samples - trim_samples)
 
         if partial:
             results.append({"type": "partial", "text": " ".join(partial)})
@@ -342,7 +409,14 @@ class StreamingASREngine:
 
         results = []
         prompt = self._build_prompt()
-        text = self._transcribe(self.audio_buffer, prompt or None)
+
+        try:
+            audio = self._preprocess_audio(self.audio_buffer)
+        except Exception as e:
+            logger.warning("Preprocessing failed: %s", e)
+            audio = self.audio_buffer
+
+        text = self._transcribe(audio, prompt or None)
 
         if text:
             score = self.hallucination_filter.check_segment(text, 0.0, 0.0)

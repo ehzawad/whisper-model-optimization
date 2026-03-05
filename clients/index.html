@@ -130,10 +130,11 @@
                 // Get mic access
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        sampleRate: TARGET_SR,
-                        channelCount: 1,
-                        echoCancellation: true,
-                        noiseSuppression: true,
+                        sampleRate: { ideal: TARGET_SR },
+                        channelCount: { exact: 1 },
+                        echoCancellation: { ideal: true },
+                        noiseSuppression: { ideal: true },
+                        autoGainControl: { ideal: true },
                     }
                 });
 

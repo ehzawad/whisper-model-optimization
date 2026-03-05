@@ -13,6 +13,7 @@ websockets>=12.0
 numpy>=1.26.0
 soundfile>=0.12.0
 librosa>=0.10.0
+noisereduce>=3.0.0,<4.0
 
 # PyTorch (Whisper model + Silero VAD)
 torch>=2.5.0
