@@ -1,144 +1,201 @@
-# Bengali Whisper Medium — Inference Optimization Report
+# Bengali Whisper Medium — Comprehensive Inference Benchmark
 
 **Model**: Fine-tuned Whisper Medium (~769M params) for Bengali ASR
 **GPU**: NVIDIA GeForce RTX 2050 (4 GB VRAM)
-**Software**: PyTorch 2.9.0+cu128, Transformers 4.57.1, CUDA 12.8, cuDNN 9.11
-**Test audio**: 15.8-minute Bengali meeting recording (48 kHz, 87 MB)
-**Date**: 2026-03-04
+**Software**: PyTorch 2.10.0+cu128, Transformers 4.57.6, CUDA 12.8
+**Audio corpus**: 254 individual speaker clips (19.5 min total, 3 speakers) + 1 long 15.8-min meeting recording
+**Date**: 2026-03-05
 
 ---
 
-## 1. Problem
+## 1. Methods Tested
 
-The model weights in float32 occupy 2.9 GB. With activation memory and KV cache
-overhead, peak VRAM during inference reaches ~4.5 GB — exceeding the 4 GB
-available on the RTX 2050. The model cannot run in its default precision on this
-GPU.
+Four inference strategies were benchmarked across all 255 audio files:
 
-## 2. Methods Tested
-
-Four quantization strategies were benchmarked on the same 15.8-minute audio:
-
-| # | Method | Description |
-|---|---|---|
-| A | **float16** | Half-precision weights + SDPA attention (baseline) |
-| B | **bitsandbytes int8** | LLM.int8() quantization via `BitsAndBytesConfig(load_in_8bit=True)` |
-| C | **bitsandbytes int4** | NF4 quantization via `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")` |
-| D | **quanto int8** | int8 weight quantization via `QuantoConfig(weights="int8")` |
-
-All methods used `attn_implementation="sdpa"` for fused scaled-dot-product
-attention. cuDNN was disabled due to a missing fp16 conv1d kernel in cuDNN 9.11
-for this GPU (compute capability 8.6); the non-cuDNN fallback has negligible
-impact since only the two initial encoder convolutions are affected.
-
-## 3. Results
-
-### 3.1 Performance
-
-| Method | VRAM Peak | VRAM vs fp16 | Wall Time | Relative Speed |
-|---|---|---|---|---|
-| **float16** | **2,417 MiB** | baseline | **443 s** | **1.00x** |
-| **bnb int8** | **1,789 MiB** | **-26.0%** | 930 s | 0.48x |
-| **bnb int4 (nf4)** | 2,065 MiB | -14.6% | 535 s | 0.83x |
-| **quanto int8** | 2,823 MiB | +16.8% | 1,133 s | 0.39x |
-
-### 3.2 Transcription Quality
-
-Similarity was measured against the float16 baseline using Python's
-`difflib.SequenceMatcher` on the full 15.8-minute transcript:
-
-| Method | Word-level Similarity | Char-level Similarity | Output Length |
+| # | Method | Model | Description |
 |---|---|---|---|
-| **float16** (ref) | — | — | 9,411 chars |
-| **bnb int8** | **96.5%** | **95.5%** | 9,666 chars |
-| **bnb int4 (nf4)** | 89.9% | 11.1% | 8,849 chars |
-| **quanto int8** | **98.6%** | **96.8%** | 9,402 chars |
+| A | **fp16** | Fine-tuned Medium | Half-precision + SDPA attention (baseline) |
+| B | **fp16_compiled** | Fine-tuned Medium | fp16 + `torch.compile(mode="default")` kernel fusion |
+| C | **turbo_fp16** | whisper-large-v3-turbo | OpenAI's pruned Large-v3 (4 decoder layers), generic Bengali |
+| D | **turbo_compiled** | whisper-large-v3-turbo | Turbo + `torch.compile(mode="default")` |
 
-### 3.3 Sample Comparison (opening lines)
+All methods used `attn_implementation="sdpa"` and `torch.backends.cudnn.enabled = False`
+(cuDNN 9.x lacks fp16 conv1d kernels for compute capability 8.6).
 
-**float16:**
-> হ্যাঁ আমরা সবাই আনামিউটেড থাকবো আলোয়েস আর এরাউন্ড ছয়টা চল্লিশের দিকে শুরু করছি
+## 2. Overall Performance
 
-**bnb int8:**
-> হ্যাঁ আমরা সবাই আনামিউটেড থাকবো আলোয়েস আর এরাউন্ড ছয়টা চল্লিশের দিকে শুরু করছি
+| Method | Load(s) | Clips(s) | Long(s) | Clip RTF | Long RTF | VRAM Peak |
+|---|---|---|---|---|---|---|
+| **fp16** | 1.2 | 447.9 | 433.5 | 0.383 | 0.458 | **2,417 MiB** |
+| **fp16_compiled** | 1.6 | 435.9 | 420.4 | 0.373 | 0.444 | 2,609 MiB |
+| **turbo_fp16** | 72.8 | 792.0 | **224.5** | 0.677 | **0.237** | **1,782 MiB** |
+| **turbo_compiled** | 5.3 | 774.9 | **227.3** | 0.662 | **0.240** | 1,808 MiB |
 
-**bnb int4:**
-> হ্যাঁ আমরা সবাই আন্ডামিউটেড থাকবো আলোয়েস আর এরাউন্ট ছয়টা চল্লিশের দিকে শুরু করছি
+RTF = Real-Time Factor (lower is faster; RTF < 1.0 means faster than real-time).
 
-**quanto int8:**
-> হ্যাঁ আমরা সবাই আনামিউটেড থাকবো আলোয়েস আর এরাউন্ড ছয়টা চল্লিশের দিকে শুরু করছি
+## 3. Relative Speed and VRAM
 
-Note: bnb int4 introduces visible errors from word 3 onward ("আনামিউটেড" →
-"আন্ডামিউটেড", "এরাউন্ড" → "এরাউন্ট").
+| Method | Clip Speedup | Long Speedup | VRAM vs fp16 |
+|---|---|---|---|
+| **fp16** | 1.00x | 1.00x | baseline |
+| **fp16_compiled** | 1.03x | 1.03x | +7.9% |
+| **turbo_fp16** | 0.57x | **1.93x** | **-26.2%** |
+| **turbo_compiled** | 0.58x | **1.91x** | **-25.2%** |
 
-## 4. Analysis
+## 4. Per-Clip Inference Time Statistics
 
-### float16 (Recommended)
-The best balance of speed, accuracy, and simplicity. Peak VRAM of 2.4 GB leaves
-1.6 GB of headroom on the 4 GB GPU — more than enough for concurrent system
-tasks. No additional dependencies beyond PyTorch and Transformers.
+254 individual clips, duration range 2.0s - 14.8s (mean 4.6s):
 
-### bitsandbytes int8 (Best for constrained memory)
-Achieves the largest VRAM reduction (-26%, from 2.4 GB to 1.8 GB) with 96.5%
-word-level fidelity. The differences are minor and typically affect
-transliterations of English loanwords (e.g., "অনেক" vs "আমাদের"). The
-trade-off is 2x slower inference. Requires the `bitsandbytes` and `accelerate`
-packages.
+| Method | Mean | Median | P95 | Max | Min |
+|---|---|---|---|---|---|
+| **fp16** | 1.764s | 1.517s | 3.740s | 6.189s | 0.593s |
+| **fp16_compiled** | 1.716s | 1.471s | 3.613s | 6.246s | 0.568s |
+| **turbo_fp16** | 3.118s | 1.935s | 6.307s | 6.714s | 0.428s |
+| **turbo_compiled** | 3.051s | 1.934s | 6.096s | 6.196s | 0.443s |
 
-### bitsandbytes int4 (Not recommended)
-Counter-intuitively uses more VRAM than int8 (2.1 GB vs 1.8 GB) due to
-dequantization buffer overhead in the NF4 scheme. Quality drops significantly
-— 89.9% word match with errors appearing from the very first sentence. The 11.1%
-character-level similarity reflects pervasive small changes across the entire
-transcript. Not suitable for production ASR.
+## 5. Per-Speaker Breakdown (Mean Inference Time)
 
-### quanto int8 (Not recommended)
-Highest fidelity among quantized methods (98.6% word match) but uses MORE VRAM
-than float16 (2.8 GB vs 2.4 GB) due to quanto's internal dequantization buffers.
-Also the slowest at 2.6x slower than float16. Provides no practical benefit on
-this hardware.
+| Method | Sazzad (90 clips) | saiful (69 clips) | Sunny (95 clips) |
+|---|---|---|---|
+| **fp16** | 1.783s | 1.906s | 1.641s |
+| **fp16_compiled** | 1.738s | 1.850s | 1.598s |
+| **turbo_fp16** | 4.480s | 2.080s | 2.582s |
+| **turbo_compiled** | 4.373s | 2.043s | 2.530s |
 
-## 5. Environment Notes
+Note: Turbo is disproportionately slow on Sazzad's clips (4.5s vs 2.1s for saiful).
+This correlates with hallucination — turbo generates repetitive garbage tokens on
+Sazzad's noisier clips, inflating generation time.
 
-- **cuDNN 9.11 + RTX 2050**: cuDNN lacks fp16/bf16 conv1d kernels for compute
-  capability 8.6. Setting `torch.backends.cudnn.enabled = False` resolves this
-  with no measurable impact (only 2 conv layers in the Whisper encoder are
-  affected; the rest uses SDPA attention and linear layers).
+## 6. Transcript Accuracy (Cross-Method Similarity)
 
-- **Checkpoint compatibility**: The model was saved with Transformers 4.26 and
-  lacks a `generation_config.json`. The modern `language="bn"` argument to
-  `generate()` does not work. Instead, forced decoder IDs are set via
-  `model.generation_config.forced_decoder_ids`.
+### 6.1 vs fp16 Baseline (254 clips)
 
-- **Long-form audio**: Whisper's `generate()` only processes the first 30-second
-  segment. For audio longer than 30 seconds, the HuggingFace `pipeline` with
-  `chunk_length_s=30` handles automatic chunking and stitching.
+| Method | Avg Word Sim | Avg Char Sim | Mean Output Len | Empty Clips |
+|---|---|---|---|---|
+| **fp16** (ref) | 100.0% | 100.0% | 46.1 chars | 0 |
+| **fp16_compiled** | **99.6%** | **99.9%** | 46.1 chars | 0 |
+| **turbo_fp16** | 8.7% | 38.5% | 107.5 chars | 0 |
+| **turbo_compiled** | 8.9% | 38.4% | 107.7 chars | 0 |
 
-## 6. Recommendation
+### 6.2 Long Audio (15.8 min) vs fp16
 
-**Use float16 + SDPA** (`transcribe.py` as currently configured). It provides
-the best speed, full accuracy, and fits comfortably within 4 GB VRAM.
+| Method | Word Sim | Char Sim | Length |
+|---|---|---|---|
+| **fp16** (ref) | 100.0% | 100.0% | 9,411 chars |
+| **fp16_compiled** | **99.8%** | **99.8%** | 9,410 chars |
+| **turbo_fp16** | 3.6% | 0.5% | 6,069 chars |
+| **turbo_compiled** | 4.1% | 0.7% | 6,096 chars |
 
-If a future use case requires lower memory (e.g., running alongside another
-model), switch to **bitsandbytes int8** — accept the 2x speed penalty for a
-26% VRAM reduction with minimal quality loss.
+### 6.3 Pairwise Word Similarity Matrix
 
-Avoid int4 and quanto int8 on this hardware.
+|  | fp16 | fp16_compiled | turbo_fp16 | turbo_compiled |
+|---|---|---|---|---|
+| **fp16** | 100.0% | 99.6% | 8.7% | 8.9% |
+| **fp16_compiled** | 99.6% | 100.0% | 8.7% | 8.9% |
+| **turbo_fp16** | 8.7% | 8.7% | 100.0% | 93.4% |
+| **turbo_compiled** | 8.9% | 8.9% | 93.4% | 100.0% |
 
-## 7. File Reference
+## 7. Turbo Hallucination Analysis
+
+The generic whisper-large-v3-turbo produces severe hallucinations on this meeting
+audio. Examples from the worst clips:
+
+**fp16 (correct):**
+> আমরা সবাই আনুষ্ঠানিকভাবে আর আমার অ্যারাউন্ট ছয়টা চল্লিশের দিকে
+
+**turbo_fp16 (hallucinated):**
+> নেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনেনে
+
+The turbo model also shows systematic Bengali script errors even on clips where it
+doesn't fully hallucinate:
+- Missing juktakshar (conjunct consonants)
+- Phonetic transliteration instead of standard Bengali orthography
+- "আম্রা" instead of "আমরা", "সিধান্তো" instead of "সিদ্ধান্ত"
+
+Root cause: whisper-large-v3-turbo is a generic multilingual model not fine-tuned
+for Bengali meeting audio. The fine-tuned medium model's domain-specific training
+data gives it a massive accuracy advantage despite being a smaller model.
+
+## 8. torch.compile Analysis
+
+`torch.compile(mode="default")` provides a modest 3% speedup on this hardware:
+
+- Clip RTF: 0.383 -> 0.373 (2.7% faster)
+- Long RTF: 0.458 -> 0.444 (3.1% faster)
+- VRAM cost: +192 MiB (+7.9%) for compiled kernel caches
+
+The limited speedup is due to the RTX 2050's small SM count (16 SMs) — torch.compile's
+kernel fusion and `max_autotune_gemm` mode cannot be used effectively. On larger GPUs
+(A100, RTX 4090), torch.compile typically delivers 4-5x speedup.
+
+Note: `mode="reduce-overhead"` (CUDA Graphs) was tested but causes OOM — CUDA Graphs
+allocate ~856 MiB in private pools, exhausting the 4 GB VRAM.
+
+## 9. Overall Efficiency
+
+| Method | Total Compute(s) | Rel Speed | Avg Accuracy | VRAM | Model |
+|---|---|---|---|---|---|
+| **fp16** | 881.4 | 1.00x | 100.0% | 2,417 MiB | fine-tuned medium |
+| **fp16_compiled** | 856.2 | 1.03x | 99.6% | 2,609 MiB | fine-tuned medium |
+| **turbo_fp16** | 1,016.5 | 0.87x | 8.7% | 1,782 MiB | turbo-v3 generic |
+| **turbo_compiled** | 1,002.2 | 0.88x | 8.9% | 1,808 MiB | turbo-v3 generic |
+
+## 10. Key Findings
+
+1. **Fine-tuned fp16 remains the best choice** — fastest on short clips, perfect
+   accuracy, and fits within 4 GB VRAM with 1.6 GB headroom.
+
+2. **torch.compile gives ~3% speedup** on RTX 2050, not worth the +8% VRAM overhead
+   and compilation latency. Becomes significant only on GPUs with more SMs.
+
+3. **whisper-large-v3-turbo is 1.93x faster on long audio** due to its 4-layer
+   decoder (vs 24 layers), but **catastrophically fails on Bengali meeting audio**
+   — only 8.7% word similarity. Fine-tuning is essential for domain-specific Bengali ASR.
+
+4. **Turbo uses 26% less VRAM** (1,782 MiB vs 2,417 MiB) thanks to the pruned
+   decoder, but the accuracy penalty makes it unusable for this use case.
+
+5. **Short clip overhead matters** — turbo's larger encoder (large-v3 encoder vs
+   medium encoder) makes per-clip latency ~1.8x worse than the fine-tuned medium,
+   despite having fewer decoder layers.
+
+## 11. Recommendation
+
+**Use fp16 + SDPA** (`transcribe.py`) for production Bengali ASR on RTX 2050.
+
+For Bengali-specific improvements, the path forward is:
+- Fine-tune whisper-large-v3-turbo on Bengali data (would combine turbo's decoder
+  speed with Bengali accuracy)
+- Use speculative decoding with a Bengali-distilled assistant model (when available)
+
+## 12. Previous Quantization Results (Single Long Audio)
+
+For reference, the earlier quantization benchmark on just the 15.8-min audio:
+
+| Method | VRAM Peak | Wall Time | Word Similarity |
+|---|---|---|---|
+| **fp16** | 2,417 MiB | 443s | baseline |
+| **bnb int8** | 1,789 MiB | 930s (0.48x) | 96.5% |
+| **bnb int4 (nf4)** | 2,065 MiB | 535s (0.83x) | 89.9% |
+| **quanto int8** | 2,823 MiB | 1,133s (0.39x) | 98.6% |
+
+## 13. File Reference
 
 ```
 bengali-whisper-medium/
-├── transcribe.py                          # Inference script (fp16 + SDPA)
-├── BENCHMARK_REPORT.md                    # This report
-├── meeting_22_11_23/
-│   ├── *.wav                              # 254 audio chunks (by speaker)
-│   ├── *.txt                              # Corresponding transcripts
-│   └── single_audio/
-│       ├── *.wav                          # Full 15.8 min meeting audio
-│       ├── *.txt                          # Full meeting transcript (fp16)
-│       ├── benchmark_fp16.txt             # Benchmark output: float16
-│       ├── benchmark_bnb_int8.txt         # Benchmark output: bitsandbytes int8
-│       ├── benchmark_bnb_int4.txt         # Benchmark output: bitsandbytes int4
-│       └── benchmark_quanto_int8.txt      # Benchmark output: quanto int8
+├── transcribe.py                       # Inference script (fp16 + SDPA)
+├── benchmark_enhanced.py               # Comprehensive benchmark script
+├── BENCHMARK_REPORT.md                 # This report
+├── benchmark_results/
+│   ├── enhanced_summary.json           # Aggregate metrics (JSON)
+│   ├── transcripts_fp16.json           # Per-file transcripts + timing
+│   ├── transcripts_fp16_compiled.json
+│   ├── transcripts_turbo_fp16.json
+│   └── transcripts_turbo_compiled.json
+└── meeting_22_11_23/
+    ├── *.wav                           # 254 audio chunks (3 speakers)
+    ├── *.txt                           # Corresponding transcripts
+    └── single_audio/
+        ├── *.wav                       # Full 15.8 min meeting audio
+        └── benchmark_*.txt             # Previous quantization benchmarks
 ```

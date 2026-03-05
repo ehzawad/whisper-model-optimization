@@ -1,0 +1,64 @@
+{
+  "metadata": {
+    "num_clips": 254,
+    "total_clip_audio_s": 1169.92,
+    "long_audio_s": 947.34,
+    "speakers": {
+      "Sazzad": 90,
+      "saiful": 69,
+      "Sunny": 95
+    },
+    "device": "NVIDIA GeForce RTX 2050",
+    "torch_version": "2.10.0+cu128"
+  },
+  "methods": {
+    "fp16": {
+      "load_time_s": 1.2219389340025373,
+      "vram_peak_mib": 2416.7470703125,
+      "clips_total_inference_s": 447.9353977799765,
+      "long_audio_inference_s": 433.4513391330256,
+      "clip_rtf": 0.38287694695361774,
+      "long_rtf": 0.45754569545572404,
+      "clip_mean_time_s": 1.7635251881101437,
+      "clip_median_time_s": 1.5174052014772315,
+      "clip_p95_time_s": 3.7397259256831603,
+      "avg_word_similarity_vs_fp16": 1.0
+    },
+    "fp16_compiled": {
+      "load_time_s": 1.5532748149707913,
+      "vram_peak_mib": 2608.65771484375,
+      "clips_total_inference_s": 435.8762918713037,
+      "long_audio_inference_s": 420.37114490399836,
+      "clip_rtf": 0.37256931403113347,
+      "long_rtf": 0.44373840955095145,
+      "clip_mean_time_s": 1.716048393194109,
+      "clip_median_time_s": 1.4708964960009325,
+      "clip_p95_time_s": 3.613286444422556,
+      "avg_word_similarity_vs_fp16": 0.9959851675517306
+    },
+    "turbo_fp16": {
+      "load_time_s": 72.77348896197509,
+      "vram_peak_mib": 1782.4951171875,
+      "clips_total_inference_s": 792.0157460233313,
+      "long_audio_inference_s": 224.45235469104955,
+      "clip_rtf": 0.6769828244865728,
+      "long_rtf": 0.2369290378227981,
+      "clip_mean_time_s": 3.118172228438312,
+      "clip_median_time_s": 1.9354234554921277,
+      "clip_p95_time_s": 6.306549653990078,
+      "avg_word_similarity_vs_fp16": 0.08738334484431634
+    },
+    "turbo_compiled": {
+      "load_time_s": 5.2559912679716945,
+      "vram_peak_mib": 1808.22900390625,
+      "clips_total_inference_s": 774.8756890721852,
+      "long_audio_inference_s": 227.3226719510276,
+      "clip_rtf": 0.6623322014088016,
+      "long_rtf": 0.2399589080488817,
+      "clip_mean_time_s": 3.0506916892605718,
+      "clip_median_time_s": 1.9341234560124576,
+      "clip_p95_time_s": 6.095649420254631,
+      "avg_word_similarity_vs_fp16": 0.08858864981818397
+    }
+  }
+}
