@@ -20,6 +20,9 @@ import argparse
 import glob
 import json
 import os
+
+os.environ["ORT_LOG_LEVEL"] = "ERROR"
+
 import sys
 import time
 import warnings
@@ -93,6 +96,7 @@ def transcribe_audio(
     beam_size: int = 1,
     vad_filter: bool = True,
     batch_size: int = 8,
+    chunk_length: int | None = None,
 ) -> str:
     if model is None:
         model = get_model()
@@ -107,6 +111,7 @@ def transcribe_audio(
         vad_filter=vad_filter,
         batch_size=batch_size,
         without_timestamps=True,
+        chunk_length=chunk_length,
     )
 
     return " ".join(seg.text.strip() for seg in segments if seg.text.strip())
@@ -119,6 +124,7 @@ def transcribe_file(
     beam_size: int = 1,
     vad_filter: bool = True,
     batch_size: int = 8,
+    chunk_length: int | None = None,
 ) -> str:
     """Transcribe a single audio file."""
     if model is None:
@@ -127,6 +133,7 @@ def transcribe_file(
     return transcribe_audio(
         audio, model=model, language=language,
         beam_size=beam_size, vad_filter=vad_filter, batch_size=batch_size,
+        chunk_length=chunk_length,
     )
 
 
@@ -138,6 +145,7 @@ def transcribe_batch(
     vad_filter: bool = True,
     batch_size: int = 8,
     json_output: bool = False,
+    chunk_length: int | None = None,
 ) -> dict | str:
     if model is None:
         model = get_model()
@@ -163,6 +171,7 @@ def transcribe_batch(
             vad_filter=vad_filter,
             batch_size=batch_size,
             without_timestamps=True,
+            chunk_length=chunk_length,
         )
         text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
         elapsed = time.perf_counter() - t0
@@ -229,6 +238,8 @@ def main():
     parser.add_argument("--beam-size", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--no-vad", action="store_true", help="Disable VAD filter")
+    parser.add_argument("--chunk-length", type=int, default=None,
+                        help="Chunk length in seconds (default: 30 from model config)")
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument(
         "--ct2-model", default=CT2_MODEL_DIR,
@@ -266,6 +277,7 @@ def main():
         vad_filter=not args.no_vad,
         batch_size=args.batch_size,
         json_output=args.json,
+        chunk_length=args.chunk_length,
     )
 
     if args.json:

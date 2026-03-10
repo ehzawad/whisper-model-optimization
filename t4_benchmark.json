@@ -1,0 +1,63 @@
+{
+  "gpu": "Tesla T4",
+  "vram_gb": 16,
+  "audio_duration_s": 947.3,
+  "audio_file": "2023-11-22T07_37_42.518693Z_65f437bd-53d0-4ff2-a667-9b5a6935c52d.wav",
+  "model": "Fine-tuned Whisper Medium (Bengali)",
+  "versions": {
+    "faster_whisper": "1.2.1",
+    "ctranslate2": "4.7.1",
+    "transformers": "4.57.6",
+    "torch": "2.10.0+cu128"
+  },
+  "results": [
+    {
+      "approach": "Naive HF pipeline",
+      "chunk_s": 15,
+      "inference_s": 290.5,
+      "rtf": 0.307,
+      "throughput_x": 3.3,
+      "speedup": 1.0
+    },
+    {
+      "approach": "Naive HF pipeline",
+      "chunk_s": 30,
+      "inference_s": 283.2,
+      "rtf": 0.299,
+      "throughput_x": 3.3,
+      "speedup": 1.0
+    },
+    {
+      "approach": "Optimized HF (SDPA+batch)",
+      "chunk_s": 15,
+      "inference_s": 23.7,
+      "rtf": 0.025,
+      "throughput_x": 39.9,
+      "speedup": 12.3
+    },
+    {
+      "approach": "Optimized HF (SDPA+batch)",
+      "chunk_s": 30,
+      "inference_s": 15.5,
+      "rtf": 0.016,
+      "throughput_x": 61.2,
+      "speedup": 18.7
+    },
+    {
+      "approach": "faster-whisper",
+      "chunk_s": 15,
+      "inference_s": 25.8,
+      "rtf": 0.027,
+      "throughput_x": 36.6,
+      "speedup": 11.3
+    },
+    {
+      "approach": "faster-whisper",
+      "chunk_s": 30,
+      "inference_s": 18.2,
+      "rtf": 0.019,
+      "throughput_x": 52.2,
+      "speedup": 16.0
+    }
+  ]
+}
