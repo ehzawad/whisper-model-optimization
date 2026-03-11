@@ -68,24 +68,24 @@ python transcribe.py $AUDIO                              # optimized HF (SDPA+ba
 python transcribe_fw.py $AUDIO                           # faster-whisper (CTranslate2)
 ```
 
-### Tesla T4 (16GB VRAM)
+### Tesla T4 (16GB VRAM) — `2023-11-22T07_37_42...9b5a6935c52d.wav` (947.3s)
 
-| Approach | Chunk | Inference | RTF | Realtime | vs Naive |
-|---|---|---|---|---|---|
-| Naive HF pipeline | 15s | 290.5s | 0.307 | 3.3x | baseline |
-| Naive HF pipeline | 30s | 283.2s | 0.299 | 3.3x | 1.0x |
-| Optimized HF (SDPA+batch) | 15s | 23.7s | 0.025 | 39.9x | 12.3x |
-| **Optimized HF (SDPA+batch)** | **30s** | **15.5s** | **0.016** | **61.2x** | **18.7x** |
-| faster-whisper | 15s | 25.8s | 0.027 | 36.6x | 11.3x |
-| **faster-whisper** | **30s** | **18.2s** | **0.019** | **52.2x** | **16.0x** |
+| Approach | Chunk | Audio | Inference | RTF | Realtime | vs Naive |
+|---|---|---|---|---|---|---|
+| Naive HF pipeline | 15s | 947.3s | 290.5s | 0.307 | 3.3x | baseline |
+| Naive HF pipeline | 30s | 947.3s | 283.2s | 0.299 | 3.3x | 1.0x |
+| Optimized HF (SDPA+batch) | 15s | 947.3s | 23.7s | 0.025 | 39.9x | 12.3x |
+| **Optimized HF (SDPA+batch)** | **30s** | **947.3s** | **15.5s** | **0.016** | **61.2x** | **18.7x** |
+| faster-whisper | 15s | 947.3s | 25.8s | 0.027 | 36.6x | 11.3x |
+| **faster-whisper** | **30s** | **947.3s** | **18.2s** | **0.019** | **52.2x** | **16.0x** |
 
-### RTX 2050 (4GB VRAM)
+### RTX 2050 (4GB VRAM) — `2023-11-22T07_37_42...9b5a6935c52d.wav` (947.3s)
 
-| Approach | Chunk | Inference | RTF | Realtime | vs Naive |
-|---|---|---|---|---|---|
-| Naive HF pipeline | 30s | 494.3s | 0.522 | 1.9x | baseline |
-| Optimized HF (SDPA+batch) | 30s | 76.6s | 0.081 | 12.4x | 6.5x |
-| **faster-whisper** | **30s** | **37.9s** | **0.040** | **25.0x** | **13.0x** |
+| Approach | Chunk | Audio | Inference | RTF | Realtime | vs Naive |
+|---|---|---|---|---|---|---|
+| Naive HF pipeline | 30s | 947.3s | 494.3s | 0.522 | 1.9x | baseline |
+| Optimized HF (SDPA+batch) | 30s | 947.3s | 76.6s | 0.081 | 12.4x | 6.5x |
+| **faster-whisper** | **30s** | **947.3s** | **37.9s** | **0.040** | **25.0x** | **13.0x** |
 
 ### Key observations
 
