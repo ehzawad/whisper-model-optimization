@@ -57,37 +57,22 @@ python clients/test_client.py audio.wav
 open http://localhost:8000
 ```
 
-## Benchmarks: Naive HF Pipeline vs faster-whisper
+## Benchmarks
 
-**Task:** Bengali speech-to-text on a 947.3s (15m47s) meeting recording
-**Model:** Fine-tuned Whisper Medium for Bengali (float16, CTranslate2 4.7.1)
-
-### Reproduce
+**Audio:** `2023-11-22T07_37_42...9b5a6935c52d.wav` — 947.3s (15m47s) Bengali meeting recording
 
 ```bash
 AUDIO=meeting_22_11_23/single_audio/2023-11-22T07_37_42.518693Z_65f437bd-53d0-4ff2-a667-9b5a6935c52d.wav
-
-# naive HF baseline (transformers.pipeline, batch_size=1, sequential decoding)
-python transcribe_naive.py $AUDIO --chunk-length 15
-python transcribe_naive.py $AUDIO --chunk-length 30
-
-# optimized HF (SDPA + batched chunking + cuDNN benchmark + auto batch_size)
-python transcribe.py $AUDIO --chunk-length 15
-python transcribe.py $AUDIO --chunk-length 30
-
-# faster-whisper (CTranslate2 + Silero VAD + batched inference)
-python transcribe_fw.py $AUDIO --chunk-length 15
-python transcribe_fw.py $AUDIO --chunk-length 30
-
-# faster-whisper default (chunk_length=None → 30s from model FeatureExtractor)
-python transcribe_fw.py $AUDIO
+python transcribe_naive.py $AUDIO                        # naive HF baseline
+python transcribe.py $AUDIO                              # optimized HF (SDPA+batch)
+python transcribe_fw.py $AUDIO                           # faster-whisper (CTranslate2)
 ```
 
 ### Tesla T4 (16GB VRAM)
 
-| Approach | Chunk | Inference | RTF | Throughput | Speedup |
+| Approach | Chunk | Inference | RTF | Realtime | vs Naive |
 |---|---|---|---|---|---|
-| Naive HF pipeline | 15s | 290.5s | 0.307 | 3.3x | baseline (1.0x) |
+| Naive HF pipeline | 15s | 290.5s | 0.307 | 3.3x | baseline |
 | Naive HF pipeline | 30s | 283.2s | 0.299 | 3.3x | 1.0x |
 | Optimized HF (SDPA+batch) | 15s | 23.7s | 0.025 | 39.9x | 12.3x |
 | **Optimized HF (SDPA+batch)** | **30s** | **15.5s** | **0.016** | **61.2x** | **18.7x** |
@@ -96,20 +81,19 @@ python transcribe_fw.py $AUDIO
 
 ### RTX 2050 (4GB VRAM)
 
-| Approach | Chunk | Inference | RTF | Throughput | Speedup |
+| Approach | Chunk | Inference | RTF | Realtime | vs Naive |
 |---|---|---|---|---|---|
-| Naive HF pipeline | 15s | 501.6s | 0.530 | 1.9x | baseline (1.0x) |
-| Naive HF pipeline | 30s | 497.9s | 0.526 | 1.9x | 1.0x |
-| **faster-whisper** | **15s** | **55.7s** | **0.059** | **17.0x** | **9.0x** |
-| **faster-whisper** | **30s** | **39.4s** | **0.042** | **24.0x** | **12.6x** |
+| Naive HF pipeline | 30s | 494.3s | 0.522 | 1.9x | baseline |
+| Optimized HF (SDPA+batch) | 30s | 76.6s | 0.081 | 12.4x | 6.5x |
+| **faster-whisper** | **30s** | **37.9s** | **0.040** | **25.0x** | **13.0x** |
 
 ### Key observations
 
-- **Naive HF pipeline** uses `transformers.pipeline(chunk_length_s=N)` with sequential decoding, deprecated `forced_decoder_ids`, and `batch_size=1`. Chunk size has negligible impact (~2%) because the bottleneck is sequential per-chunk decoding.
-- **Optimized HF** adds fp16 + SDPA attention + cuDNN benchmark mode + batched chunk processing (auto `batch_size=41` on T4's 16GB). This is why it's competitive with — and even slightly faster than — faster-whisper on T4: the large VRAM allows processing 41 chunks in parallel.
-- **faster-whisper** wins on VRAM-constrained GPUs (RTX 2050, 4GB) where the optimized HF batch size drops to ~3. CTranslate2's C++ kernels + Silero VAD silence-skipping dominate at low batch sizes.
-- **15s vs 30s chunks:** Consistently ~40–50% slower across all approaches because more chunks = more decoder passes (64 vs 32). Each chunk incurs fixed encoder + decoder overhead.
-- **T4 vs RTX 2050:** T4's 320 GB/s memory bandwidth + 16GB VRAM delivers dramatically higher throughput, especially for the optimized HF approach which scales with batch size.
+- **Naive HF pipeline** — `transformers.pipeline(chunk_length_s=N)`, sequential per-chunk decoding, `batch_size=1`. Chunk size barely matters (~2%).
+- **Optimized HF** — fp16 + SDPA + batched chunks. Competitive with faster-whisper on T4 (batch_size=41), but falls behind on low-VRAM GPUs (batch_size=2).
+- **faster-whisper** — CTranslate2 C++ kernels + Silero VAD. Wins on VRAM-constrained GPUs. Half the VRAM (~800MB vs ~1700MB).
+- **15s vs 30s chunks** — ~40-50% slower (64 vs 32 decoder passes).
+- **T4 vs RTX 2050** — T4's 320 GB/s bandwidth + 16GB VRAM delivers dramatically higher throughput.
 
 ## Architecture
 

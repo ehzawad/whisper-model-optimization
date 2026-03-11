@@ -19,6 +19,9 @@ import sys
 import time
 import warnings
 
+import torch
+torch.backends.cudnn.enabled = False
+
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 warnings.filterwarnings("ignore")
 
@@ -86,9 +89,7 @@ def main():
 
     if not args.json:
         print(f"Backend: transformers.pipeline (naive baseline)", file=sys.stderr)
-        print(f"Device: {args.device} | chunk_length_s: {args.chunk_length}", file=sys.stderr)
-        print(f"Model load: {t_load:.2f}s", file=sys.stderr)
-        print(f"Files: {len(audio_files)}", file=sys.stderr)
+        print(f"Device: {args.device} | Chunk: {args.chunk_length}s | Model load: {t_load:.2f}s", file=sys.stderr)
         print(file=sys.stderr)
 
     results = []
@@ -120,11 +121,8 @@ def main():
         else:
             rtf = elapsed / max(duration, 0.01)
             throughput = duration / max(elapsed, 0.001)
-            output_lines.append(
-                f"--- {os.path.basename(path)} "
-                f"({duration:.1f}s, {elapsed*1000:.0f}ms, "
-                f"RTF={rtf:.3f}, {throughput:.1f}x) ---"
-            )
+            fname = os.path.basename(path)
+            output_lines.append(f"--- {fname} ({duration:.1f}s audio, {elapsed:.1f}s inference, RTF={rtf:.3f}, {throughput:.1f}x) ---")
             output_lines.append(text)
             output_lines.append("")
 
@@ -147,12 +145,12 @@ def main():
             else:
                 print(line)
 
-        if len(audio_files) >= 1:
+        if len(audio_files) > 1:
             rtf = total_inference / max(total_audio, 0.01)
             throughput = total_audio / max(total_inference, 0.001)
             print(
-                f"=== Total: {total_audio:.0f}s audio in {total_inference:.1f}s "
-                f"(RTF={rtf:.4f}, {throughput:.1f}x real-time) ===",
+                f"=== Total: {total_audio:.0f}s audio, {total_inference:.1f}s inference "
+                f"(RTF={rtf:.3f}, {throughput:.1f}x) ===",
                 file=sys.stderr,
             )
 
