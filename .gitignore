@@ -15,3 +15,16 @@ benchmark_results*.json
 bench_clips/
 
 .claude/
+.cursor/
+
+# Audio data
+ec-audio/
+meeting_22_11_23/
+*.wav
+
+# Logs
+live_transcription_log/
+
+# Benchmark results
+rtx2050_benchmark.json
+t4_benchmark.json
