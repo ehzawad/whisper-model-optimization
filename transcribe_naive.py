@@ -30,7 +30,7 @@ MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 _pipe = None
 
 
-def get_pipeline(chunk_length_s: int = 30, device: str = "cuda"):
+def get_pipeline(chunk_length_s: int = 30, device: str = "cuda", batch_size: int = 1):
     """Load (or return cached) transformers ASR pipeline."""
     global _pipe
     if _pipe is None or _pipe.model.device.type != device:
@@ -43,7 +43,7 @@ def get_pipeline(chunk_length_s: int = 30, device: str = "cuda"):
             tokenizer=MODEL_DIR,
             chunk_length_s=chunk_length_s,
             device=0 if device == "cuda" else -1,
-            batch_size=1,
+            batch_size=batch_size,
             torch_dtype=torch.float16,
             ignore_warning=True,
         )
@@ -75,6 +75,8 @@ def main():
     parser.add_argument("--device", default="cuda", choices=["cuda", "cpu"])
     parser.add_argument("--chunk-length", type=int, default=30,
                         help="chunk_length_s passed to pipeline (default: 30)")
+    parser.add_argument("--batch-size", type=int, default=1,
+                        help="Batch size for chunk processing (default: 1)")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     args = parser.parse_args()
 
@@ -84,12 +86,12 @@ def main():
         sys.exit(1)
 
     t_load = time.perf_counter()
-    pipe = get_pipeline(chunk_length_s=args.chunk_length, device=args.device)
+    pipe = get_pipeline(chunk_length_s=args.chunk_length, device=args.device, batch_size=args.batch_size)
     t_load = time.perf_counter() - t_load
 
     if not args.json:
         print(f"Backend: transformers.pipeline (naive baseline)", file=sys.stderr)
-        print(f"Device: {args.device} | Chunk: {args.chunk_length}s | Model load: {t_load:.2f}s", file=sys.stderr)
+        print(f"Device: {args.device} | Chunk: {args.chunk_length}s | Batch: {args.batch_size} | Model load: {t_load:.2f}s", file=sys.stderr)
         print(file=sys.stderr)
 
     results = []
@@ -132,6 +134,7 @@ def main():
             "model": "Naive HF pipeline (transformers.pipeline)",
             "backend": "huggingface",
             "chunk_length_s": args.chunk_length,
+            "batch_size": args.batch_size,
             "total_audio_s": round(total_audio, 2),
             "total_inference_s": round(total_inference, 3),
             "overall_rtf": round(overall_rtf, 4),

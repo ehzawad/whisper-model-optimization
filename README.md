@@ -81,16 +81,18 @@ python transcribe_fw.py $AUDIO                           # faster-whisper (CTran
 
 ### RTX 2050 (4GB VRAM) — `2023-11-22T07_37_42...9b5a6935c52d.wav` (947.3s)
 
-| Approach | Chunk | Audio | Inference | RTF | Realtime | vs Naive |
+All three backends use **batch_size=2** (max that fits in 4GB VRAM with the naive pipeline) for a fair comparison.
+
+| Approach | Batch | Audio | Inference | RTF | Realtime | vs Naive |
 |---|---|---|---|---|---|---|
-| Naive HF pipeline | 30s | 947.3s | 494.3s | 0.522 | 1.9x | baseline |
-| Optimized HF (SDPA+batch) | 30s | 947.3s | 76.6s | 0.081 | 12.4x | 6.5x |
-| **faster-whisper** | **30s** | **947.3s** | **37.9s** | **0.040** | **25.0x** | **13.0x** |
+| Naive HF pipeline | 2 | 947.3s | 484.6s | 0.512 | 1.95x | baseline |
+| Optimized HF (SDPA+batch) | 2 | 947.3s | 79.3s | 0.084 | 11.9x | 6.1x |
+| **faster-whisper** | **2** | **947.3s** | **68.0s** | **0.072** | **13.9x** | **7.1x** |
 
 ### Key observations
 
-- **Naive HF pipeline** — `transformers.pipeline(chunk_length_s=N)`, sequential per-chunk decoding, `batch_size=1`. Chunk size barely matters (~2%).
-- **Optimized HF** — fp16 + SDPA + batched chunks. Competitive with faster-whisper on T4 (batch_size=41), but falls behind on low-VRAM GPUs (batch_size=2).
+- **Naive HF pipeline** — `transformers.pipeline(chunk_length_s=30, batch_size=N)`. Even with batching, ~6x slower than optimized backends due to eager attention and no fp16 optimization.
+- **Optimized HF** — fp16 + SDPA + batched chunks with overlap deduplication. Competitive with faster-whisper on T4 (batch_size=41), but falls behind on low-VRAM GPUs.
 - **faster-whisper** — CTranslate2 C++ kernels + Silero VAD. Wins on VRAM-constrained GPUs. Half the VRAM (~800MB vs ~1700MB).
 - **15s vs 30s chunks** — ~40-50% slower (64 vs 32 decoder passes).
 - **T4 vs RTX 2050** — T4's 320 GB/s bandwidth + 16GB VRAM delivers dramatically higher throughput.
