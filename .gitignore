@@ -13,3 +13,5 @@ onnx_model*/
 
 benchmark_results*.json
 bench_clips/
+
+.claude/
