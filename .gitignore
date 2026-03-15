@@ -24,6 +24,7 @@ meeting_22_11_23/
 
 # Logs
 live_transcription_log/
+log_folder/
 
 # Benchmark results
 rtx2050_benchmark.json
