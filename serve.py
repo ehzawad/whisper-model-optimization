@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """FastAPI batch ASR server — Bengali Whisper (faster-whisper / CTranslate2).
 
-Mirrors the Wav2Vec2 ASR server API contract: accepts base64-encoded audio
-in JSON, returns transcriptions. Uses faster-whisper for inference.
-
 Usage:
     python serve.py
     python serve.py --port 8001 --host 0.0.0.0
@@ -11,16 +8,17 @@ Usage:
 
 import base64
 import io
+import os
 import time
-import wave
+
 import numpy as np
-from scipy.signal import resample
+import soundfile as sf
 from fastapi import FastAPI, HTTPException
+from faster_whisper import BatchedInferencePipeline, WhisperModel
 from pydantic import BaseModel
 from typing import List
 
 from loguru import logger
-from faster_whisper import WhisperModel
 
 # logger configuration
 logger.add(
@@ -31,20 +29,27 @@ logger.add(
 
 app = FastAPI()
 
-# Constants
-RATE = 16000  # Target sampling rate
-MODEL_PATH = "ct2_model_fp16"
+# ── Constants ────────────────────────────────────────────────────────────────
+SAMPLE_RATE = 16000
+MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
+CT2_MODEL_DIR = os.path.join(MODEL_DIR, "ct2_model_fp16")
 DEVICE = "cuda"
 COMPUTE_TYPE = "float16"
 
-# Initialize the faster-whisper model
-logger.info(f"Loading faster-whisper model from {MODEL_PATH} ({DEVICE}/{COMPUTE_TYPE})")
+# ── Model + pipeline (cached singletons) ─────────────────────────────────────
+logger.info(f"Loading faster-whisper model from {CT2_MODEL_DIR} ({DEVICE}/{COMPUTE_TYPE})")
 t_load = time.perf_counter()
-model = WhisperModel(MODEL_PATH, device=DEVICE, compute_type=COMPUTE_TYPE)
-logger.info(f"Model loaded in {time.perf_counter() - t_load:.2f}s")
+_model = WhisperModel(
+    CT2_MODEL_DIR,
+    device=DEVICE,
+    compute_type=COMPUTE_TYPE,
+    cpu_threads=4,
+)
+_pipeline = BatchedInferencePipeline(model=_model)
+logger.info(f"Model + pipeline ready in {time.perf_counter() - t_load:.2f}s")
 
 
-# Pydantic models to mirror the Java request/response structure
+# ── Pydantic models (mirrors Java Wav2Vec2 ASR server) ───────────────────────
 class Language(BaseModel):
     sourceLanguage: str
 
@@ -67,41 +72,34 @@ class AsrResponse(BaseModel):
     time_taken: float
 
 
-# Function to load and resample audio data
-def load_audio_from_base64(audio_content: str, target_rate=RATE):
-    """Convert base64 encoded audio to waveform and resample it if necessary."""
-    audio_data = base64.b64decode(audio_content)
-
-    with io.BytesIO(audio_data) as wav_file:
-        with wave.open(wav_file, 'rb') as wav_file:
-            framerate = wav_file.getframerate()
-            num_frames = wav_file.getnframes()
-
-            audio_data = np.frombuffer(
-                wav_file.readframes(num_frames), dtype=np.int16
-            ).astype(np.float32) / 32768.0
-
-            if framerate != target_rate:
-                num_samples = round(len(audio_data) * target_rate / framerate)
-                audio_data = resample(audio_data, num_samples)
-
-            return audio_data
+# ── Audio helpers ─────────────────────────────────────────────────────────────
+def load_audio_from_base64(audio_content: str) -> np.ndarray:
+    """Decode base64 audio to float32 numpy array at 16kHz."""
+    raw = base64.b64decode(audio_content)
+    buf = io.BytesIO(raw)
+    audio, sr = sf.read(buf, dtype="float32")
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    if sr != SAMPLE_RATE:
+        import librosa
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=SAMPLE_RATE)
+    return audio
 
 
-def transcribe_audio(audio_data):
-    """Transcribe single audio data using faster-whisper model."""
-    segments, info = model.transcribe(
-        audio_data,
+def transcribe(audio: np.ndarray) -> str:
+    """Transcribe audio using BatchedInferencePipeline with Silero VAD."""
+    segments, _info = _pipeline.transcribe(
+        audio,
         language="bn",
         beam_size=1,
-        vad_filter=False,
+        vad_filter=True,
+        batch_size=8,
         without_timestamps=True,
     )
-
-    transcription = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
-    return transcription
+    return " ".join(seg.text.strip() for seg in segments if seg.text.strip())
 
 
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok", "model": "faster-whisper", "device": DEVICE}
@@ -117,8 +115,8 @@ async def process_asr(request: AsrRequest):
     outputs = []
     for i, item in enumerate(request.audio):
         try:
-            audio_data = load_audio_from_base64(item.audioContent)
-            transcription = transcribe_audio(audio_data)
+            audio = load_audio_from_base64(item.audioContent)
+            transcription = transcribe(audio)
         except Exception as e:
             raise HTTPException(
                 status_code=500,
