@@ -12,8 +12,9 @@ Usage:
 import base64
 import io
 import time
+import wave
 import numpy as np
-import soundfile as sf
+from scipy.signal import resample
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
@@ -41,12 +42,6 @@ logger.info(f"Loading faster-whisper model from {MODEL_PATH} ({DEVICE}/{COMPUTE_
 t_load = time.perf_counter()
 model = WhisperModel(MODEL_PATH, device=DEVICE, compute_type=COMPUTE_TYPE)
 logger.info(f"Model loaded in {time.perf_counter() - t_load:.2f}s")
-
-# Warmup inference — first CTranslate2 GPU call is slow due to CUDA kernel caching
-logger.info("Running warmup inference...")
-_dummy = np.zeros(RATE * 2, dtype=np.float32)
-list(model.transcribe(_dummy, language="bn", beam_size=1, vad_filter=False, without_timestamps=True)[0])
-logger.info("Warmup done")
 
 
 # Pydantic models to mirror the Java request/response structure
@@ -76,16 +71,21 @@ class AsrResponse(BaseModel):
 def load_audio_from_base64(audio_content: str, target_rate=RATE):
     """Convert base64 encoded audio to waveform and resample it if necessary."""
     audio_data = base64.b64decode(audio_content)
-    audio, sr = sf.read(io.BytesIO(audio_data), dtype="float32")
 
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
+    with io.BytesIO(audio_data) as wav_file:
+        with wave.open(wav_file, 'rb') as wav_file:
+            framerate = wav_file.getframerate()
+            num_frames = wav_file.getnframes()
 
-    if sr != target_rate:
-        import librosa
-        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_rate)
+            audio_data = np.frombuffer(
+                wav_file.readframes(num_frames), dtype=np.int16
+            ).astype(np.float32) / 32768.0
 
-    return audio
+            if framerate != target_rate:
+                num_samples = round(len(audio_data) * target_rate / framerate)
+                audio_data = resample(audio_data, num_samples)
+
+            return audio_data
 
 
 def transcribe_audio(audio_data):
