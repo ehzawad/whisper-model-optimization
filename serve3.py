@@ -46,7 +46,6 @@ DEVICE = "cuda"
 COMPUTE_TYPE = "int8_float16"
 
 BATCH_TIMEOUT_S = 0.1   # 100ms collection window
-MAX_COLLECT = 32         # Max items to collect before forcing a GPU pass
 GPU_BATCH_SIZE = 16      # batch_size for _pipeline.forward()
 
 # ── Model + pipeline (cached singletons) ─────────────────────────────────────
@@ -216,9 +215,9 @@ async def _batch_worker():
         first_item = await _batch_queue.get()
         batch = [first_item]
 
-        # Collect more items for up to BATCH_TIMEOUT_S
+        # Collect more items for up to BATCH_TIMEOUT_S (100ms window)
         deadline = loop.time() + BATCH_TIMEOUT_S
-        while len(batch) < MAX_COLLECT:
+        while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
@@ -228,6 +227,13 @@ async def _batch_worker():
                 )
                 batch.append(item)
             except asyncio.TimeoutError:
+                break
+
+        # Drain anything that arrived right at the boundary
+        while not _batch_queue.empty():
+            try:
+                batch.append(_batch_queue.get_nowait())
+            except asyncio.QueueEmpty:
                 break
 
         audios = [item[0] for item in batch]
@@ -257,7 +263,7 @@ async def lifespan(app: FastAPI):
     worker_task = asyncio.create_task(_batch_worker())
     logger.info(
         f"Batch worker started (window={BATCH_TIMEOUT_S*1000:.0f}ms, "
-        f"max_collect={MAX_COLLECT}, gpu_batch={GPU_BATCH_SIZE})"
+        f"gpu_batch={GPU_BATCH_SIZE})"
     )
     yield
     worker_task.cancel()
