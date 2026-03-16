@@ -203,10 +203,10 @@ def transcribe_batch(audios: list[np.ndarray], batch_size: int = GPU_BATCH_SIZE)
 
 # ── Batch worker (background task) ───────────────────────────────────────────
 async def _batch_worker():
-    """Collect audio items for up to 100ms, then process as one GPU batch.
+    """Collect up to GPU_BATCH_SIZE items (100ms window), process, deliver immediately.
 
-    Like an elevator: waits for the first person, holds the door for 100ms
-    to let more people in, then goes.
+    If more items remain in the queue after processing, grab the next batch
+    right away (no 100ms wait) so overflow clients aren't penalized.
     """
     loop = asyncio.get_event_loop()
 
@@ -215,9 +215,9 @@ async def _batch_worker():
         first_item = await _batch_queue.get()
         batch = [first_item]
 
-        # Collect more items for up to BATCH_TIMEOUT_S (100ms window)
+        # Collect up to GPU_BATCH_SIZE items within 100ms
         deadline = loop.time() + BATCH_TIMEOUT_S
-        while True:
+        while len(batch) < GPU_BATCH_SIZE:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
@@ -229,19 +229,12 @@ async def _batch_worker():
             except asyncio.TimeoutError:
                 break
 
-        # Drain anything that arrived right at the boundary
-        while not _batch_queue.empty():
-            try:
-                batch.append(_batch_queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-
+        # Process this batch and deliver results immediately
         audios = [item[0] for item in batch]
         futures = [item[1] for item in batch]
 
-        logger.info(f"Batch worker: processing {len(audios)} items from queue")
+        logger.info(f"Batch worker: processing {len(audios)} items")
 
-        # Run GPU batch in executor so we don't block the event loop
         try:
             texts = await loop.run_in_executor(
                 None, transcribe_batch, audios
@@ -253,6 +246,9 @@ async def _batch_worker():
             for fut in futures:
                 if not fut.done():
                     fut.set_exception(e)
+
+        # If queue still has items, loop back immediately (no 100ms wait)
+        # — the next iteration's await _batch_queue.get() returns instantly
 
 
 # ── Lifespan: start/stop the batch worker ────────────────────────────────────
