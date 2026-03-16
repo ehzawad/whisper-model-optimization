@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser(description="Bengali ASR CLI client")
     parser.add_argument("inputs", nargs="+", help="Audio file(s) or directory")
     parser.add_argument(
-        "--server", default="http://localhost:8002",
+        "--server", default="http://localhost:8003",
         # "--server", default="http://20.51.201.105:8000",
         help="ASR server URL (default: http://localhost:8001)",
     )
