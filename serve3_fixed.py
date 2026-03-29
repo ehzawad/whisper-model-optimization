@@ -46,7 +46,7 @@ DEVICE = "cuda"
 COMPUTE_TYPE = "int8_float16"
 
 BATCH_TIMEOUT_S = 0.1   # 100ms collection window
-GPU_BATCH_SIZE = 16      # batch_size for _pipeline.forward()
+GPU_BATCH_SIZE = 4       # RTX 2050 (4GB); increase to 16 for T4 (16GB)
 
 # ── Model + pipeline (cached singletons) ─────────────────────────────────────
 logger.info(f"Loading faster-whisper model from {CT2_MODEL_DIR} ({DEVICE}/{COMPUTE_TYPE})")
@@ -291,35 +291,44 @@ async def process_asr(request: AsrRequest):
     if not request.audio or len(request.audio) == 0:
         raise HTTPException(status_code=400, detail="No audio content provided")
 
-    # Parallel CPU decode: base64 → resample → numpy arrays
+    # Parallel CPU decode: base64 → resample → numpy arrays (per-audio isolation)
     loop = asyncio.get_event_loop()
     decode_futs = [
         loop.run_in_executor(_decode_pool, load_audio_from_base64, item.audioContent)
         for item in request.audio
     ]
-    try:
-        audios = await asyncio.gather(*decode_futs)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error decoding audio: {e}"
-        )
+    results = await asyncio.gather(*decode_futs, return_exceptions=True)
 
-    # Submit each audio to the batch queue, get a future per item
+    # Submit successfully decoded audios to batch queue, track failures
     batch_futs = []
-    for audio in audios:
-        fut = loop.create_future()
-        await _batch_queue.put((audio, fut))
-        batch_futs.append(fut)
+    output_map = {}  # index → future or error string
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"Decode failed for audio {i}: {result}")
+            output_map[i] = ""
+        else:
+            fut = loop.create_future()
+            await _batch_queue.put((result, fut))
+            batch_futs.append(fut)
+            output_map[i] = fut
 
     # Wait for the batch worker to process our items
-    try:
-        texts = await asyncio.gather(*batch_futs)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error in transcription: {e}"
-        )
+    if batch_futs:
+        try:
+            await asyncio.gather(*batch_futs)
+        except Exception as e:
+            logger.error(f"Batch transcription error: {e}")
 
-    outputs = [Output(source=t) for t in texts]
+    # Assemble outputs preserving original order
+    outputs = []
+    for i in range(len(request.audio)):
+        val = output_map[i]
+        if isinstance(val, str):
+            outputs.append(Output(source=val))
+        elif val.done() and not val.cancelled() and val.exception() is None:
+            outputs.append(Output(source=val.result()))
+        else:
+            outputs.append(Output(source=""))
     time_taken = time.time() - start_time
 
     response = AsrResponse(
