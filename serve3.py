@@ -46,7 +46,8 @@ DEVICE = "cuda"
 COMPUTE_TYPE = "int8_float16"
 
 BATCH_TIMEOUT_S = 0.1   # 100ms collection window
-GPU_BATCH_SIZE = 16      # batch_size for _pipeline.forward()
+# GPU_BATCH_SIZE = 16      # batch_size for _pipeline.forward()
+GPU_BATCH_SIZE = 4      # batch_size for _pipeline.forward()
 
 # ── Model + pipeline (cached singletons) ─────────────────────────────────────
 logger.info(f"Loading faster-whisper model from {CT2_MODEL_DIR} ({DEVICE}/{COMPUTE_TYPE})")
