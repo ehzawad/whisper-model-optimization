@@ -158,13 +158,11 @@ def transcribe_batch(audios: list[np.ndarray], batch_size: int = GPU_BATCH_SIZE)
 
     all_features = []  # List of [1, 80, 3000] tensors
     chunk_to_audio = []
-    failed_audios = set()
 
     for fut in futures:
         audio_idx, chunks, error = fut.result()
         if error is not None:
             logger.error(f"Feature extraction failed for audio {audio_idx}: {error}")
-            failed_audios.add(audio_idx)
             continue
         for feat in chunks:
             all_features.append(feat)
@@ -305,6 +303,8 @@ async def process_asr(request: AsrRequest):
             try:
                 await asyncio.wait_for(_batch_queue.put((result, fut)), timeout=10.0)
             except asyncio.TimeoutError:
+                for prev_fut in batch_futs:
+                    prev_fut.cancel()
                 raise HTTPException(
                     status_code=503, detail="Server overloaded, try again later"
                 )
@@ -324,6 +324,7 @@ async def process_asr(request: AsrRequest):
             )
         except Exception as e:
             logger.error(f"Batch transcription error: {e}")
+            raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
     # Assemble outputs preserving original order
     outputs = []
