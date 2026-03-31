@@ -97,20 +97,12 @@ All three backends use **batch_size=2** (max that fits in 4GB VRAM with the naiv
 - **15s vs 30s chunks** — ~40-50% slower (64 vs 32 decoder passes).
 - **T4 vs RTX 2050** — T4's 320 GB/s bandwidth + 16GB VRAM delivers dramatically higher throughput.
 
-## Architecture
+## Inference of Faster Whisper
 
-```
-transcribe_fw.py           # faster-whisper (CTranslate2) inference
-transcribe_naive.py        # Naive HF pipeline baseline (for benchmarking)
-transcribe.py              # HF pipeline (used by streaming server)
-ct2_model_fp16/            # CTranslate2 converted model (float16, 1.5GB)
-streaming/
-  server.py                # FastAPI + WebSocket server (multi-session)
-  asr_engine.py            # ASRSession + BatchScheduler
-  vad.py                   # Silero VAD wrapper
-  hallucination.py         # Bengali hallucination filter
-  audio_utils.py           # PCM16/float32 conversion
-clients/
-  test_client.py           # Python WebSocket client
-  index.html               # Browser mic capture client
-```
+Faster-Whisper is not a new neural architecture. It is a reimplementation of OpenAI Whisper using CTranslate2, so the model family is still Whisper; what changes is the inference runtime and packaging. When you load WhisperModel("large-v3"), Faster-Whisper pulls a converted CTranslate2 Whisper model, and CTranslate2’s Whisper class explicitly implements the Whisper speech recognition model published by OpenAI.
+
+The underlying model is the same encoder-decoder Transformer design: audio is processed into log-Mel spectrogram features, passed through the Whisper encoder, and then the decoder generates tokens from a prompt that includes task/language control tokens. In CTranslate2, encode() takes mel features shaped like [batch_size, n_mels, chunk_length], and generate() performs decoding; beam_size=1 corresponds to greedy search.
+
+What Faster-Whisper adds is speed and deployment features: CTranslate2 supports faster inference, lower memory use, 8-bit quantization, multithreading, batch processing, and options like flash attention and tensor parallelism. The Faster-Whisper wrapper also exposes batched transcription, word-level timestamps, and an integrated Silero VAD filter for removing non-speech regions.
+
+So the clean mental model is: Whisper architecture stays the same, Faster-Whisper is the optimized CTranslate2 execution stack around it.
