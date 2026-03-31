@@ -1,4 +1,4 @@
-# Benchmark: serve3_resilient.py (CT2) vs serve4.py (HF + Flash Attention 2)
+# Benchmark: serve3.py (CT2) vs serve4.py (HF + Flash Attention 2)
 
 **Date:** 2026-03-29
 **GPU:** NVIDIA GeForce RTX 2050 (4GB VRAM)
@@ -9,7 +9,7 @@
 
 | Server | Backend | Inference | Attention |
 |--------|---------|-----------|-----------|
-| serve3_resilient.py | CTranslate2 (faster-whisper) | `_pipeline.forward()` batched | CT2 internal |
+| serve3.py | CTranslate2 (faster-whisper) | `_pipeline.forward()` batched | CT2 internal |
 | serve4.py | HF Transformers | `model.generate()` batched | Flash Attention 2 |
 
 Both use the same cross-client batching architecture (100ms collection window,
@@ -22,7 +22,7 @@ Audio: `meeting_22_11_23/*.wav` — 254 files, mixed durations (2-15s), 48kHz WA
 
 | Server | Total Time | Per Item | Success | Faster? |
 |--------|-----------|----------|---------|---------|
-| serve3_resilient.py (CT2) | 136.55s | 0.54s | 254/254 | — |
+| serve3.py (CT2) | 136.55s | 0.54s | 254/254 | — |
 | serve4.py (HF+FA2) | 122.82s | 0.48s | 254/254 | **10% faster** |
 
 ## Test 2: 1 Long Meeting Recording (947s / 15 min)
@@ -32,7 +32,7 @@ Auto-chunked into ~32 chunks of 30s each.
 
 | Server | Total Time | RTF | Success | Faster? |
 |--------|-----------|-----|---------|---------|
-| serve3_resilient.py (CT2) | 40.34s | 0.043 | 1/1 | **29% faster** |
+| serve3.py (CT2) | 40.34s | 0.043 | 1/1 | **29% faster** |
 | serve4.py (HF+FA2) | 57.07s | 0.060 | 1/1 | — |
 
 ## Test 3: 53 EC Audio Clips (2.8-10.1s each)
@@ -41,7 +41,7 @@ Audio: `ec-audio/` — 53 files (13 x 2.8s + 40 x 10.1s), 16kHz WAV
 
 | Server | Total Time | Per Item | Success | Faster? |
 |--------|-----------|----------|---------|---------|
-| serve3_resilient.py (CT2) | 34.74s | 0.66s | 53/53 | — |
+| serve3.py (CT2) | 34.74s | 0.66s | 53/53 | — |
 | serve4.py (HF+FA2) | 30.92s | 0.58s | 53/53 | **11% faster** |
 
 ## Summary
@@ -50,7 +50,7 @@ Audio: `ec-audio/` — 53 files (13 x 2.8s + 40 x 10.1s), 16kHz WAV
 |----------|--------|--------|
 | Many short clips (254) | **serve4.py (HF+FA2)** | 10% faster |
 | Many short clips (53) | **serve4.py (HF+FA2)** | 11% faster |
-| Single long audio (947s) | **serve3_resilient.py (CT2)** | 29% faster |
+| Single long audio (947s) | **serve3.py (CT2)** | 29% faster |
 
 **Conclusion:**
 - For **short clips** (the typical production workload): Flash Attention 2 with

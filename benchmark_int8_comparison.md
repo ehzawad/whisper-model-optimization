@@ -6,7 +6,7 @@
 
 ## Question
 
-serve3_resilient.py uses CT2 with int8_float16 and is 29% faster than serve4.py
+serve3.py uses CT2 with int8_float16 and is 29% faster than serve4.py
 (fp16) on long audio. Can we close that gap by switching serve4.py to int8
 via bitsandbytes `load_in_8bit=True`?
 
@@ -16,7 +16,7 @@ via bitsandbytes `load_in_8bit=True`?
 
 | Config | Backend | Quantization | Attention |
 |--------|---------|-------------|-----------|
-| serve3_resilient.py | CTranslate2 | int8_float16 (CT2 native) | CT2 internal |
+| serve3.py | CTranslate2 | int8_float16 (CT2 native) | CT2 internal |
 | serve4.py (fp16) | HF Transformers | fp16 | Flash Attention 2 |
 | serve4.py (int8) | HF Transformers | int8 (bitsandbytes) | Flash Attention 2 |
 
@@ -24,7 +24,7 @@ via bitsandbytes `load_in_8bit=True`?
 
 | Config | Total | Per Item | vs CT2 baseline |
 |--------|-------|----------|-----------------|
-| serve3_resilient (CT2 int8_fp16) | **136.55s** | **0.54s** | baseline |
+| serve3 (CT2 int8_fp16) | **136.55s** | **0.54s** | baseline |
 | serve4 fp16+FA2 | **122.82s** | **0.48s** | 10% faster |
 | serve4 int8+FA2 (bitsandbytes) | **285.03s** | **1.12s** | 109% slower |
 
@@ -32,7 +32,7 @@ via bitsandbytes `load_in_8bit=True`?
 
 | Config | Total | RTF | vs CT2 baseline |
 |--------|-------|-----|-----------------|
-| serve3_resilient (CT2 int8_fp16) | **40.34s** | **0.043** | baseline |
+| serve3 (CT2 int8_fp16) | **40.34s** | **0.043** | baseline |
 | serve4 fp16+FA2 | **57.07s** | **0.060** | 41% slower |
 | serve4 int8+FA2 (bitsandbytes) | **127.05s** | **0.134** | 215% slower |
 
@@ -40,7 +40,7 @@ via bitsandbytes `load_in_8bit=True`?
 
 | Config | Total | Per Item |
 |--------|-------|----------|
-| serve3_resilient (CT2 int8_fp16) | 34.74s | 0.66s |
+| serve3 (CT2 int8_fp16) | 34.74s | 0.66s |
 | serve4 fp16+FA2 | 30.92s | 0.58s |
 | serve4 int8+FA2 (bitsandbytes) | 72.57s | 1.37s |
 
@@ -67,7 +67,7 @@ already fits in fp16. So int8 only adds overhead with no benefit.
 | Scenario | Best Config | Why |
 |----------|------------|-----|
 | Short clips (production) | **serve4 fp16+FA2** | FA2 attention speed wins |
-| Long audio (>30s) | **serve3_resilient CT2 int8_fp16** | Native int8 + C++ chunking |
+| Long audio (>30s) | **serve3 CT2 int8_fp16** | Native int8 + C++ chunking |
 | Never use | serve4 int8 (bitsandbytes) | 2-3x slower, no benefit on this model size |
 
 **Recommendation:** Keep serve4.py at fp16 (revert the int8 change). The fp16+FA2
