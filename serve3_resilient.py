@@ -2,12 +2,12 @@
 """FastAPI batch ASR server — Bengali Whisper with cross-client GPU batching.
 
 Builds on serve2.py: adds a 100ms collection window that groups audio from
-multiple concurrent clients into a single GPU batch.  When only one client
+multiple concurrent clients into a single GPU batch. When only one client
 is active the extra latency is at most 100ms.
 
 Usage:
-    python serve3.py
-    python serve3.py --port 8003 --host 0.0.0.0
+    python serve3_resilient.py
+    python serve3_resilient.py --port 8003 --host 0.0.0.0
 """
 
 import asyncio
@@ -71,18 +71,23 @@ _batch_queue: asyncio.Queue[Tuple[np.ndarray, asyncio.Future]] = None
 class Language(BaseModel):
     sourceLanguage: str
 
+
 class Config(BaseModel):
     language: Language
 
+
 class AudioContent(BaseModel):
     audioContent: str  # Base64 encoded audio
+
 
 class AsrRequest(BaseModel):
     config: Config
     audio: List[AudioContent]
 
+
 class Output(BaseModel):
     source: str
+
 
 class AsrResponse(BaseModel):
     taskType: str
@@ -107,7 +112,7 @@ def transcribe_batch(audios: list[np.ndarray], batch_size: int = GPU_BATCH_SIZE)
     """Transcribe multiple audio arrays in batched GPU passes.
 
     Calls _pipeline.forward() directly with stacked features from multiple
-    audios.  Audio clips longer than 30s are auto-chunked into <=30s pieces,
+    audios. Audio clips longer than 30s are auto-chunked into <=30s pieces,
     all chunks are batched together, and text is reassembled per original audio.
     """
     if not audios:
