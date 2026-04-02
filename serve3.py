@@ -52,7 +52,7 @@ MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = "cuda"
 
 BATCH_TIMEOUT_S = 0.1   # 100ms collection window
-GPU_BATCH_SIZE = 4       # RTX 2050 (4GB); increase to 16 for T4 (16GB)
+GPU_BATCH_SIZE = 8       # RTX 2050 (4GB, 2.85GB peak); increase to 16 for T4 (16GB)
 CLIENT_TIMEOUT_S = 300   # Max wait for client futures (5 min)
 BATCH_FORWARD_TIMEOUT_S = 120  # Max time for a single GPU batch
 
